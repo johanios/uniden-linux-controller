@@ -1,0 +1,40 @@
+[project]
+name = "ubc125xlt"
+version = "0.1.0"
+description = "Python API for BC125AT and UBC125XLT-scanner"
+authors = [
+    { name = "Johan", email = "no@email.com" }
+]
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MPL-2.0" }
+
+dependencies = [
+    "pyserial",
+    "fastapi",
+    "pydantic",
+    "uvicorn",
+    "numpy",
+    "sounddevice",
+    "soundfile",
+    "pyudev"
+]
+
+classifiers = [
+    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+    "Topic :: Communications :: Ham Radio",
+    "Topic :: Scientific/Engineering :: Interface Engine/Protocol Translator",
+    "Topic :: Software Development :: Libraries :: Python Modules"
+]
+
+[project.urls]
+Homepage = "https://github.com/johanios/uniden-linux-controller"
+Repository = "https://github.com/johanios/uniden-linux-controller.git"
+Issues = "https://github.com/johanios/uniden-linux-controller/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bearcat"]
