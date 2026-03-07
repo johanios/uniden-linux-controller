@@ -20,7 +20,7 @@ If the output shows Python 3.10.x or newer, you're good.
 ```
 cd ~/Documents/GitHub
 git clone <repo-url>
-cd ubc125xlt-linux-controller
+cd uniden-linux-controller
 ```
 ### 1.1 Install python venv
 ```
@@ -48,7 +48,7 @@ source venv/bin/activate
 1. Turn on the BC125AT/UBC125XLT  
 2. Ensure it is scanning or idle  
 3. Plug in the USB cable after the scanner is powered on (helps avoid detection issues)
-4. List USB devices with ```ls /dev/ttyACM*```. You may need to update variable DEVICE in scanner_api.py with the correct device path.
+4. (You can list USB devices with ```ls /dev/ttyACM*```.)
 5. Run ```sudo usermod -aG dialout $USER```
 6. Restart your computer to make sure the changes take effect.
 7. After restarting, verify that your user is in the `dialout` group by running:```groups```. You should see `dialout` listed among the groups.
