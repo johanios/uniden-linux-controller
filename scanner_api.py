@@ -131,8 +131,6 @@ BLOCK_SIZE = 1024
 
 app = FastAPI(title="UBC125XLT Web API")
 
-os.makedirs("recordings", exist_ok=True)
-
 RECORDINGS_DIR = os.path.join(
     os.path.dirname(__file__),
     "recordings"
@@ -226,8 +224,7 @@ def stop_recording():
         stream = None
 
     if audio_buffer:
-        os.makedirs("recordings", exist_ok=True)
-        filename_path = os.path.join("recordings", current_filename)
+        filename_path = os.path.join(RECORDINGS_DIR, current_filename)
         data = np.concatenate(audio_buffer, axis=0).astype(np.float32)
         sf.write(filename_path, data, SAMPLE_RATE)
         print(f"[Recorder] Saved recording: {filename_path}")

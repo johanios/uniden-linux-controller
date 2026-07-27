@@ -436,6 +436,8 @@ async function updateActivity() {
 
     const tbody = document.getElementById('activityTableBody');
 
+    window.shownRecordings = new Set();
+
     tbody.innerHTML = "";
 
     for (const entry of data) {
@@ -450,32 +452,43 @@ async function updateActivity() {
 
         if(entry.recording){
 
-            // Aktiv inspelning har ingen färdig WAV ännu
-            if(entry.duration === null){
+            // Kontrollera om denna fil redan visats ovan
+            if(window.shownRecordings === undefined){
+                window.shownRecordings = new Set();
+            }
 
-                recording = "⏳ Recording...";
+            if(window.shownRecordings.has(entry.recording)){
+
+                recording = "↳ Same recording";
 
             } else {
 
-                const exists = await recordingExists(entry.recording);
+                if(entry.duration === null){
 
-                if(exists){
+                    recording = "⏳ Recording...";
 
-                    recording = `
-                    <audio controls style="height:30px">
-                        <source src="/recordings/${entry.recording}" type="audio/wav">
-                    </audio>
-                    `;
+                } else {
 
+                    const exists = await recordingExists(entry.recording);
+
+                    if(exists){
+
+                        recording = `
+                        <audio controls style="height:30px">
+                            <source src="/recordings/${entry.recording}" type="audio/wav">
+                        </audio>
+                        `;
+
+                        window.shownRecordings.add(entry.recording);
+
+                    }
+                    else {
+
+                        recording = "⏳ Waiting for next hit to finalize recording...";
+
+                    }
                 }
-                else {
-
-                    recording = "⏳ Waiting for next hit to finalize recording...";
-
-                }
-
             }
-
         }
 
         let duration = "-";
