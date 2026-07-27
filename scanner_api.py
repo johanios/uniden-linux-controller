@@ -5,6 +5,8 @@ from time import sleep, time
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from datetime import datetime
+from fastapi.staticfiles import StaticFiles
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
@@ -117,11 +119,32 @@ audio_buffer = []
 stream = None
 current_recording_channel = None
 
+# --- Activity log ---
+activity_log = []
+MAX_ACTIVITY_LOG = 500
+active_activity = None
+_last_squelch_state = False
+
 SAMPLE_RATE = 44100
 NUM_CHANNELS = 2
 BLOCK_SIZE = 1024
 
 app = FastAPI(title="UBC125XLT Web API")
+
+os.makedirs("recordings", exist_ok=True)
+
+RECORDINGS_DIR = os.path.join(
+    os.path.dirname(__file__),
+    "recordings"
+)
+
+os.makedirs(RECORDINGS_DIR, exist_ok=True)
+
+app.mount(
+    "/recordings",
+    StaticFiles(directory=RECORDINGS_DIR),
+    name="recordings"
+)
 
 class Command(BaseModel):
     action: str
@@ -228,10 +251,50 @@ def resume_recording():
             stream.start()
         recording_paused = False
 
+# --- Activity logging ---
+def start_activity_log(state):
+    global activity_log, active_activity
+
+    now = datetime.now()
+
+    entry = {
+        "date": now.strftime("%Y-%m-%d"),
+        "time": now.strftime("%H:%M:%S"),
+        "channel": getattr(state, "channel", None),
+        "frequency": f"{state.frequency/1e6:.6f}",
+        "modulation": state.modulation.value if state.modulation else "",
+        "tone": state.tone_code or "",
+        "duration": None,
+        "recording": None,
+        "_start": time()
+    }
+
+    activity_log.append(entry)
+    active_activity = entry
+
+    if len(activity_log) > MAX_ACTIVITY_LOG:
+        activity_log.pop(0)
+
+
+def stop_activity_log():
+    global active_activity
+
+    if active_activity:
+        duration = time() - active_activity["_start"]
+        active_activity["duration"] = int(duration)
+
+        if current_filename:
+            active_activity["recording"] = current_filename
+
+        active_activity.pop("_start", None)
+
+    active_activity = None
+
 # --- Background loop ---
 def scanner_poll_loop():
     global screen_text, squelch_status, mute_status, current_state
     global recording_active, recording_enabled, current_recording_channel
+    global _last_squelch_state
 
     while True:
         scanner = get_scanner()
@@ -247,6 +310,17 @@ def scanner_poll_loop():
                 try:
                     state, squelch_flag, muted_flag = scanner.get_reception_status()
                     current_state = state
+
+                    # --- Activity logging ---
+                    if state:
+
+                        if squelch and not _last_squelch_state:
+                            start_activity_log(state)
+
+                        elif not squelch and _last_squelch_state:
+                            stop_activity_log()
+
+                        _last_squelch_state = squelch
 
                     # --- Auto-lockout logic ---
                     if auto_lockout_enabled and state and squelch:
@@ -329,6 +403,12 @@ def get_status_endpoint():
         "recording_enabled": recording_enabled,
         "auto_lockout_enabled": auto_lockout_enabled
     }
+
+# --- Endpoint for logging ---
+@app.get("/activity")
+def get_activity_endpoint():
+    return activity_log[::-1]
+
 
 # --- Endpoint to send commands ---
 @app.post("/command")
