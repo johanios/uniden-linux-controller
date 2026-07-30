@@ -110,6 +110,7 @@ auto_lockout_enabled = False
 # Track last channel/frequency and time
 _last_channel_freq = None
 _last_channel_time = 0
+_lockout_pending_freq = None  # After lockout, wait for freq change or squelch close
 
 # --- Global recording variables ---
 recording_active = False
@@ -248,6 +249,53 @@ def resume_recording():
             stream.start()
         recording_paused = False
 
+# --- Auto-lockout helpers ---
+def _recording_channel_id(state):
+    return f"{state.frequency/1e6:.6f}"
+
+
+def _reception_trackable(state, squelch):
+    """After lockout, ignore stale open-squelch on the locked frequency."""
+    global _lockout_pending_freq
+
+    if _lockout_pending_freq is None:
+        return True
+
+    if not squelch:
+        _lockout_pending_freq = None
+        return True
+
+    if state and state.frequency != _lockout_pending_freq:
+        _lockout_pending_freq = None
+        return True
+
+    return False
+
+
+def apply_auto_lockout(scanner, locked_freq):
+    global _last_channel_freq, _last_channel_time, current_recording_channel
+    global _last_squelch_state, _lockout_pending_freq
+
+    try:
+        scanner._key_action("L", KeyAction.PRESS)
+        print(f"[AutoLockout] Temporary lockout applied on {locked_freq}")
+    except Exception as e:
+        print(f"[AutoLockout] Failed to lockout: {e}")
+        return
+
+    _lockout_pending_freq = locked_freq
+
+    if recording_active:
+        stop_recording()
+    current_recording_channel = None
+
+    if active_activity:
+        stop_activity_log()
+
+    _last_channel_freq = None
+    _last_channel_time = 0
+    _last_squelch_state = False
+
 # --- Activity logging ---
 def start_activity_log(state):
     global activity_log, active_activity
@@ -263,7 +311,8 @@ def start_activity_log(state):
         "tone": state.tone_code or "",
         "duration": None,
         "recording": None,
-        "_start": time()
+        "_start": time(),
+        "_frequency": state.frequency,
     }
 
     activity_log.append(entry)
@@ -284,6 +333,7 @@ def stop_activity_log():
             active_activity["recording"] = current_filename
 
         active_activity.pop("_start", None)
+        active_activity.pop("_frequency", None)
 
     active_activity = None
 
@@ -291,7 +341,7 @@ def stop_activity_log():
 def scanner_poll_loop():
     global screen_text, squelch_status, mute_status, current_state
     global recording_active, recording_enabled, current_recording_channel
-    global _last_squelch_state
+    global _last_squelch_state, _last_channel_freq, _last_channel_time
 
     while True:
         scanner = get_scanner()
@@ -307,39 +357,37 @@ def scanner_poll_loop():
                 try:
                     state, squelch_flag, muted_flag = scanner.get_reception_status()
                     current_state = state
+                    trackable = _reception_trackable(state, squelch)
 
                     # --- Activity logging ---
-                    if state:
+                    if state and trackable:
 
-                        if squelch and not _last_squelch_state:
-                            start_activity_log(state)
-
-                        elif not squelch and _last_squelch_state:
+                        if squelch:
+                            if active_activity and active_activity.get("_frequency") != state.frequency:
+                                stop_activity_log()
+                                start_activity_log(state)
+                            elif not _last_squelch_state:
+                                start_activity_log(state)
+                        elif _last_squelch_state:
                             stop_activity_log()
 
                         _last_squelch_state = squelch
 
                     # --- Auto-lockout logic ---
-                    if auto_lockout_enabled and state and squelch:
+                    if auto_lockout_enabled and state and squelch and trackable:
                         current_channel_freq = state.frequency
                         now = time()
-                        global _last_channel_freq, _last_channel_time
 
                         if _last_channel_freq != current_channel_freq:
                             _last_channel_freq = current_channel_freq
                             _last_channel_time = now
-                        else:
-                            if now - _last_channel_time > 10:  # 10 seconds
-                                try:
-                                    scanner._key_action("L", KeyAction.PRESS)
-                                    print(f"[AutoLockout] Temporary lockout applied on {current_channel_freq}")
-                                except Exception as e:
-                                    print(f"[AutoLockout] Failed to lockout: {e}")
-                                _last_channel_time = now  # reset timer to avoid spamming
+                        elif now - _last_channel_time > 10:  # 10 seconds
+                            apply_auto_lockout(scanner, current_channel_freq)
+                            _last_channel_time = now  # reset timer to avoid spamming
 
                     # --- Auto-recording logic ---
-                    if state and recording_enabled:
-                        channel_id = f"{state.frequency/1e6:.6f}"
+                    if state and recording_enabled and trackable:
+                        channel_id = _recording_channel_id(state)
 
                         if squelch and not mute:
                             # Squelch open
@@ -404,7 +452,10 @@ def get_status_endpoint():
 # --- Endpoint for logging ---
 @app.get("/activity")
 def get_activity_endpoint():
-    return activity_log[::-1]
+    return [
+        {k: v for k, v in entry.items() if not k.startswith("_")}
+        for entry in activity_log[::-1]
+    ]
 
 
 # --- Endpoint to send commands ---
