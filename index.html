@@ -123,6 +123,55 @@
     .keypad button {
         margin: 2px;
     }
+
+    /* Activity log table */
+
+    .activity-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .activity-info {
+        color: #aaa;
+        font-size: 14px;
+    }
+
+    .activity-table-container {
+        overflow-x: auto;
+    }
+
+    .activity-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+        font-size: 14px;
+    }
+
+    .activity-table th {
+        text-align: left;
+        padding: 8px;
+        background: #333;
+        color: #ffcc00;
+    }
+
+    .activity-table td {
+        padding: 8px;
+        border-bottom: 1px solid #333;
+    }
+
+    .activity-table tr:hover {
+        background: #292929;
+    }
+
+    .activity-active {
+        background: rgba(0, 255, 100, 0.12);
+    }
+
+    .play-button {
+        padding: 5px 12px;
+        border-radius: 6px;
+    }
 </style>
 </head>
 <body>
@@ -172,6 +221,45 @@
     <label for="channelInput">Channel:</label>
     <input type="number" id="channelInput" min="1" max="500">
     <button onclick="goToChannel()">Go</button>
+</div>
+
+<h2>Recent activity</h2>
+<div class="panel">
+
+    <div class="activity-header">
+        <div id="activityCount">
+            0 hits logged
+        </div>
+
+        <div class="activity-info">
+            Recording: <span id="activityRecording">N/A</span>
+        </div>
+    </div>
+
+    <div class="activity-table-container">
+
+        <table class="activity-table">
+
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Channel</th>
+                    <th>Frequency</th>
+                    <th>Mod</th>
+                    <th>Tone</th>
+                    <th>Length</th>
+                    <th>Recording</th>
+                </tr>
+            </thead>
+
+            <tbody id="activityTableBody">
+            </tbody>
+
+        </table>
+
+    </div>
+
 </div>
 
 <script>
@@ -274,8 +362,187 @@ async function toggleAutoLockout() {
     });
 }
 
+// Control scanner with input from a keyboard
+const keyboardMap = {
+    ArrowUp: '<',       // Jog left
+    ArrowDown: '>',     // Jog right
+    ArrowLeft: '4',
+    ArrowRight: '6',
+
+    Enter: 'E',         // Enter/Pgm
+    Backspace: '.',     // Clear
+
+    '.': '.',
+    '0': '0',
+    '1': '1',
+    '2': '2',
+    '3': '3',
+    '4': '4',
+    '5': '5',
+    '6': '6',
+    '7': '7',
+    '8': '8',
+    '9': '9'
+};
+
+document.addEventListener('keydown', function(event) {
+    // Let keyboard work as usual in text areas
+    if (event.target.tagName === 'INPUT' ||
+        event.target.tagName === 'TEXTAREA') {
+        return;
+    }
+
+    const scannerKey = keyboardMap[event.key];
+
+    if (scannerKey) {
+        event.preventDefault();
+        sendKey(scannerKey);
+    }
+});
+
+async function recordingExists(filename) {
+    try {
+
+        const response = await fetch('/recordings/' + filename, {
+            method: 'HEAD'
+        });
+
+        return response.ok;
+
+    } catch(e) {
+
+        // Ignorera om filen inte finns ännu
+        return false;
+
+    }
+}
+
+let lastActivityJson = "";
+
+async function updateActivity() {
+    try {
+
+    const res = await fetch('/activity');
+    const data = await res.json();
+
+    const json = JSON.stringify(data);
+
+    // Do nothing if log is unchanged
+    if (json === lastActivityJson) {
+        return;
+    }
+
+    lastActivityJson = json;
+
+    const tbody = document.getElementById('activityTableBody');
+
+    window.shownRecordings = new Set();
+
+    tbody.innerHTML = "";
+
+    for (const entry of data) {
+
+        const row = document.createElement('tr');
+
+        if(entry.duration === null){
+            row.classList.add("activity-active");
+        }
+
+        let recording = "-";
+
+        if(entry.recording){
+
+            // Kontrollera om denna fil redan visats ovan
+            if(window.shownRecordings === undefined){
+                window.shownRecordings = new Set();
+            }
+
+            if(window.shownRecordings.has(entry.recording)){
+
+                recording = "↳ Same recording";
+
+            } else {
+
+                if(entry.duration === null){
+
+                    recording = "⏳ Recording...";
+
+                } else {
+
+                    const exists = await recordingExists(entry.recording);
+
+                    if(exists){
+
+                        recording = `
+                        <audio controls style="height:30px">
+                            <source src="/recordings/${entry.recording}" type="audio/wav">
+                        </audio>
+                        `;
+
+                        window.shownRecordings.add(entry.recording);
+
+                    }
+                    else {
+
+                        recording = "⏳ Waiting for next hit to finalize recording...";
+
+                    }
+                }
+            }
+        }
+
+        let duration = "-";
+
+        if(entry.duration !== null){
+
+            let sec = entry.duration;
+
+            let min = Math.floor(sec / 60);
+            let seconds = sec % 60;
+
+            duration =
+                String(min).padStart(2,'00')
+                + ":" +
+                String(seconds).padStart(2,'00');
+        }
+
+        row.innerHTML = `
+            <td>${entry.date}</td>
+            <td>${entry.time}</td>
+            <td>${entry.channel ?? "-"}</td>
+            <td>${entry.frequency}</td>
+            <td>${entry.modulation}</td>
+            <td>${entry.tone || "-"}</td>
+            <td>${duration}</td>
+            <td>${recording}</td>
+        `;
+
+        tbody.appendChild(row);
+
+    }
+
+        document.getElementById('activityCount').innerText =
+            `${data.length} hits logged`;
+
+        if(data.length > 0){
+
+            document.getElementById('activityRecording').innerText =
+                data[0].recording ? "Available" : "No recording";
+
+        }
+
+
+    } catch(e){
+
+        console.log("Activity error:", e);
+
+    }
+}
 setInterval(updateStatus, 350);
+setInterval(updateActivity, 1000);
+
 updateStatus();
+updateActivity();
 </script>
 
 </body>
